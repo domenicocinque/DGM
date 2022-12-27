@@ -41,9 +41,8 @@ class TadpoleDataset(torch.utils.data.Dataset):
         
         if not full:
             X_ = X_[...,:30,:] # For DGM we use modality 1 (M1) for both node representation and graph learning.
-
         
-        self.n_features = X_.shape[-2]
+        self.num_features = X_.shape[-2]
         self.num_classes = y_.shape[-2]
         
         self.X = torch.from_numpy(X_[:,:,fold]).float().to(device)
@@ -60,7 +59,7 @@ class TadpoleDataset(torch.utils.data.Dataset):
         return self.samples_per_epoch
 
     def __getitem__(self, idx):
-        return self.X,self.y,self.mask, [[]]
+        return self.X, self.y, self.mask, torch.tensor([[],[]], dtype=torch.long).to(self.X.device)
  
     
 # class TadpoleDataset(torch.utils.data.Dataset):
@@ -134,7 +133,7 @@ class PlanetoidDataset(torch.utils.data.Dataset):
         self.X = dataset[0].x.float().to(device)
         self.y = one_hot_embedding(dataset[0].y,dataset.num_classes).float().to(device)
         self.edge_index = dataset[0].edge_index.to(device)
-        self.n_features = dataset[0].num_node_features
+        self.num_features = dataset[0].num_node_features
         self.num_classes = dataset.num_classes
         
         if split=='train':

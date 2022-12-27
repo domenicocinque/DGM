@@ -27,4 +27,5 @@ dgcnn.pytorch/
 stats_*
 train_*
 data/
-
+.DS_Store
+*.idea

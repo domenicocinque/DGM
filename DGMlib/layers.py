@@ -1,6 +1,4 @@
 import torch
-import pykeops
-from pykeops.torch import LazyTensor
 from torch.nn import Module, ModuleList, Sequential
 from torch import nn
 
@@ -54,14 +52,14 @@ class DGM_d(nn.Module):
     
         if self.training:
             if fixedges is not None:                
-                return x, fixedges, torch.zeros(fixedges.shape[0],fixedges.shape[-1]//self.k,self.k,dtype=torch.float,device=x.device)
+                return x, fixedges, torch.zeros(fixedges.shape[0], fixedges.shape[-1]//self.k,self.k, dtype=torch.float, device=x.device)
             #sampling here
             edges_hat, logprobs = self.sample_without_replacement(x)
                 
         else:
             with torch.no_grad():
                 if fixedges is not None:                
-                    return x, fixedges, torch.zeros(fixedges.shape[0],fixedges.shape[-1]//self.k,self.k,dtype=torch.float,device=x.device)
+                    return x, fixedges, torch.zeros(fixedges.shape[0], fixedges.shape[-1]//self.k, self.k,dtype=torch.float, device=x.device)
                 #sampling here
                 edges_hat, logprobs = self.sample_without_replacement(x)
               

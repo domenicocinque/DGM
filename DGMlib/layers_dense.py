@@ -5,6 +5,7 @@ from DGMlib.layers import *
 from torch.nn import Module, ModuleList, Sequential
 from torch import nn
 
+
 class DGM_d(nn.Module):
     def __init__(self, embed_f, k=5, distance=pairwise_euclidean_distances, sparse=True):
         super(DGM_d, self).__init__()
