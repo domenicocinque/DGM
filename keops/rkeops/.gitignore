@@ -1,5 +1,0 @@
-# local gitignore
-*.o
-*.so
-inst/doc
-Meta

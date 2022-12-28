@@ -83,6 +83,7 @@ class DGM(pl.LightningModule):
         self.pre_fc = MLP(hparams.pre_fc, final_activation=True)
         self.classification = MLP(fc_layers, final_activation=False)
         self.avg_accuracy = None
+        self.cross_entropy = nn.CrossEntropyLoss()
 
         # torch lightning specific
         self.automatic_optimization = False
@@ -110,22 +111,17 @@ class DGM(pl.LightningModule):
         optimizer = self.optimizers(use_pl_optimizer=True)
         optimizer.zero_grad()
 
-        X, y, mask, edges = data #data.x, data.y, data.train_mask, data.edge_index
-        X = X.squeeze(0)
-        edges = edges.squeeze(0)
-        mask = mask.squeeze(0).to(torch.bool)
-        y = y.squeeze(0)
-
+        X, y, mask, edges = data.x, data.y, data.train_mask, data.edge_index
         pred, logprobs = self(X, edges)
 
         train_pred = pred[mask, :]
-        train_lab = y[mask, :]
+        train_lab = y[mask]
 
-        loss = torch.nn.functional.binary_cross_entropy_with_logits(train_pred, train_lab)
+        loss = self.cross_entropy(train_pred, train_lab)
         loss.backward()
 
         # GRAPH LOSS
-        corr_pred = (train_pred.argmax(-1) == train_lab.argmax(-1)).float().detach()
+        corr_pred = (train_pred.argmax(-1) == train_lab).float().detach()
 
         if self.avg_accuracy is None:
             self.avg_accuracy = torch.ones_like(corr_pred) * 0.5
@@ -143,43 +139,38 @@ class DGM(pl.LightningModule):
         self.log('train/class_loss', loss.detach().cpu(), on_step=False, on_epoch=True, prog_bar=True)
         self.log('train/graph_loss', graph_loss.detach().cpu(), on_step=False, on_epoch=True, prog_bar=True)
 
-    def validation_step(self, train_batch, batch_idx):
-        X, y, mask, edges = train_batch
-        X = X.squeeze(0)
-        edges = edges.squeeze(0)
-        mask = mask.squeeze(0).to(torch.bool)
-        y = y.squeeze(0)
+    def validation_step(self, data, batch_idx):
+        X, y, mask, edge_index = data.x, data.y, data.val_mask, data.edge_index
 
-        pred, logprobs = self(X, edges)
+        pred, logprobs = self(X, edge_index)
         pred = pred.softmax(-1)
         for i in range(1, self.hparams.test_eval):
-            pred_, logprobs = self(X, edges)
+            pred_, logprobs = self(X, edge_index)
             pred += pred_.softmax(-1)
 
         test_pred = pred[mask, :]
-        test_lab = y[mask, :]
-        correct_t = (test_pred.argmax(-1) == test_lab.argmax(-1)).float().mean().item()
-        loss = torch.nn.functional.binary_cross_entropy_with_logits(test_pred, test_lab)
+        test_lab = y[mask]
+        correct_t = (test_pred.argmax(-1) == test_lab).float().mean().item()
+        loss = self.cross_entropy(test_pred, test_lab)
 
-        self.log('val_loss', loss.detach(), )
+        self.log('val/class_loss', loss.detach(), prog_bar=False)
         self.log('val/acc', correct_t, prog_bar=True)
 
-    def test_step(self, train_batch, batch_idx):
-        X, y, mask, edges = train_batch
-        edges = edges[0]
+    def test_step(self, data, batch_idx):
+        X, y, mask, edge_index = data.x, data.y, data.val_mask, data.edge_index
 
-        assert (X.shape[0] == 1)  # only works in transductive setting
-        mask = mask[0]
-        pred, logprobs = self(X, edges)
+        pred, logprobs = self(X, edge_index)
         pred = pred.softmax(-1)
         for i in range(1, self.hparams.test_eval):
-            pred_, logprobs = self(X, edges)
+            pred_, logprobs = self(X, edge_index)
             pred += pred_.softmax(-1)
-        test_pred = pred[:, mask.to(torch.bool), :]
-        test_lab = y[:, mask.to(torch.bool), :]
-        correct_t = (test_pred.argmax(-1) == test_lab.argmax(-1)).float().mean().item()
-        loss = torch.nn.functional.binary_cross_entropy_with_logits(test_pred, test_lab)
-        self.log('test_loss', loss.detach().cpu())
-        #         self.log('test_graph_loss', loss.detach().cpu())
-        self.log('test_acc', 100 * correct_t)
+
+        test_pred = pred[mask, :]
+        test_lab = y[mask]
+
+        correct_t = (test_pred.argmax(-1) == test_lab).float().mean().item()
+        loss = self.cross_entropy(test_pred, test_lab)
+
+        self.log('test/loss', loss.detach().cpu())
+        self.log('test/acc', correct_t)
 

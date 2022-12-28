@@ -1,49 +1,42 @@
+import os.path as osp
 import torch
-#from torch.utils.data import DataLoader
 from torch_geometric.datasets import Planetoid
 from torch_geometric.loader import DataLoader
 from datasets import PlanetoidDataset, TadpoleDataset
 import pytorch_lightning as pl
 from DGMlib.model_dDGM import DGM
-
+import torch_geometric.transforms as T
 from argparse import ArgumentParser
 from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping
 from pytorch_lightning.loggers import TensorBoardLogger
 
 
 def run_training_process(run_params):
-    train_data = None
-    test_data = None
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-    if run_params.dataset in ['Cora', 'CiteSeer', 'PubMed']:
-        train_data = PlanetoidDataset(split='train', name=run_params.dataset, device='cpu')
-        #train_data = Planetoid(root='data', name='Cora')
-        val_data = PlanetoidDataset(split='val', name=run_params.dataset, samples_per_epoch=1)
-        test_data = PlanetoidDataset(split='test', name=run_params.dataset, samples_per_epoch=1)
+    transform = T.Compose([
+        #T.NormalizeFeatures(),
+        T.ToDevice(device=device),
+    ])
 
-    if run_params.dataset == 'tadpole':
-        train_data = TadpoleDataset(fold=run_params.fold, train=True, device='cpu')
-        val_data = test_data = TadpoleDataset(fold=run_params.fold, train=False, samples_per_epoch=1)
+    path = osp.join('data', 'Tadpole')
+    train_data = TadpoleDataset(root=path, fold=run_params.fold, transform=transform)
 
-    if train_data is None:
-        raise Exception("Dataset %s not supported" % run_params.dataset)
-
-    train_loader = DataLoader(train_data, batch_size=1)
-    val_loader = DataLoader(val_data, batch_size=1)
-    test_loader = DataLoader(test_data, batch_size=1)
+    print(train_data[0])
+    loader = DataLoader(train_data, batch_size=1)
 
     class MyDataModule(pl.LightningDataModule):
         def setup(self, stage=None):
             pass
 
         def train_dataloader(self):
-            return train_loader
+            return loader
 
         def val_dataloader(self):
-            return val_loader
+            return loader
 
         def test_dataloader(self):
-            return test_loader
+            return loader
 
     # configure input feature size
     if run_params.pre_fc is None or len(run_params.pre_fc) == 0:
@@ -59,7 +52,7 @@ def run_training_process(run_params):
     checkpoint_callback = ModelCheckpoint(
         save_last=True,
         save_top_k=1,
-        verbose=True,
+        verbose=False,
         monitor='val_loss',
         mode='min'
     )
@@ -69,14 +62,12 @@ def run_training_process(run_params):
         patience=20,
         verbose=False,
         mode='min')
-    callbacks = [checkpoint_callback, early_stop_callback]
+    #callbacks = [checkpoint_callback, early_stop_callback]
 
-    if val_data == test_data:
-        callbacks = None
 
     logger = TensorBoardLogger("logs/")
-    trainer = pl.Trainer.from_argparse_args(run_params, logger=logger,
-                                            callbacks=callbacks)
+    trainer = pl.Trainer.from_argparse_args(run_params, logger=logger)#,
+                                          #  callbacks=callbacks)
 
     trainer.fit(model, datamodule=MyDataModule())
     trainer.test()
@@ -86,10 +77,10 @@ if __name__ == "__main__":
     parser = ArgumentParser()
     parser = pl.Trainer.add_argparse_args(parser)
     params = parser.parse_args([  # '--gpus','1',
-        '--log_every_n_steps', '100',
-        '--max_epochs', '100',
+        #'--log_every_n_steps', '1',
+        '--max_epochs', '500',
         # '--progress_bar_refresh_rate','10',
-        '--check_val_every_n_epoch', '1'])
+        '--check_val_every_n_epoch', '5'])
     parser.add_argument("--num_gpus", default=0, type=int)
 
     parser.add_argument("--dataset", default='Cora')
