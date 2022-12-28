@@ -73,12 +73,8 @@ class DGM(pl.LightningModule):
         self.graph_f = ModuleList()
         self.node_g = ModuleList()
         for i, (dgm_l, conv_l) in enumerate(zip(dgm_layers, conv_layers)):
-            if len(dgm_l) > 0:
-                self.graph_f.append(DGMBlock(embedding_channels=dgm_l[-1], embedding_f=hparams.ffun, k=k))
-            else:
-                self.graph_f.append(Identity())
-
-            self.node_g.append(conv_resolver(hparams.gfun)(-1, conv_l[1]))
+            self.graph_f.append(DGMBlock(embedding_channels=dgm_l, embedding_f=hparams.ffun, k=k))
+            self.node_g.append(conv_resolver(hparams.gfun)(-1, conv_l))
 
         self.pre_fc = MLP(hparams.pre_fc, final_activation=True)
         self.classification = MLP(fc_layers, final_activation=False)

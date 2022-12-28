@@ -15,81 +15,36 @@ def run_training_process(run_params):
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
     transform = T.Compose([
-        #T.NormalizeFeatures(),
         T.ToDevice(device=device),
     ])
 
     path = osp.join('data', 'Tadpole')
-    train_data = TadpoleDataset(root=path, fold=run_params.fold, transform=transform)
+    data = TadpoleDataset(root=path, fold=run_params.fold, transform=transform)
 
-    print(train_data[0])
-    loader = DataLoader(train_data, batch_size=1)
-
-    class MyDataModule(pl.LightningDataModule):
-        def setup(self, stage=None):
-            pass
-
-        def train_dataloader(self):
-            return loader
-
-        def val_dataloader(self):
-            return loader
-
-        def test_dataloader(self):
-            return loader
-
-    # configure input feature size
-    if run_params.pre_fc is None or len(run_params.pre_fc) == 0:
-        if len(run_params.dgm_layers[0]) > 0:
-            run_params.dgm_layers[0][0] = train_data.n_features
-        run_params.conv_layers[0][0] = train_data.n_features
-    else:
-        run_params.pre_fc[0] = train_data.num_features
-    run_params.fc_layers[-1] = train_data.num_classes
-
+    dataloader = DataLoader(data, batch_size=1)
     model = DGM(run_params)
 
-    checkpoint_callback = ModelCheckpoint(
-        save_last=True,
-        save_top_k=1,
-        verbose=False,
-        monitor='val_loss',
-        mode='min'
-    )
-    early_stop_callback = EarlyStopping(
-        monitor='val_loss',
-        min_delta=0.00,
-        patience=20,
-        verbose=False,
-        mode='min')
-    #callbacks = [checkpoint_callback, early_stop_callback]
-
-
     logger = TensorBoardLogger("logs/")
-    trainer = pl.Trainer.from_argparse_args(run_params, logger=logger)#,
-                                          #  callbacks=callbacks)
-
-    trainer.fit(model, datamodule=MyDataModule())
-    trainer.test()
+    trainer = pl.Trainer.from_argparse_args(run_params, logger=logger)
+    trainer.fit(model, dataloader, dataloader)
 
 
 if __name__ == "__main__":
     parser = ArgumentParser()
     parser = pl.Trainer.add_argparse_args(parser)
-    params = parser.parse_args([  # '--gpus','1',
-        #'--log_every_n_steps', '1',
+    params = parser.parse_args([
         '--max_epochs', '500',
-        # '--progress_bar_refresh_rate','10',
         '--check_val_every_n_epoch', '5'])
+
     parser.add_argument("--num_gpus", default=0, type=int)
 
     parser.add_argument("--dataset", default='Cora')
     parser.add_argument("--fold", default='0', type=int)  # Used for k-fold cross validation in tadpole/ukbb
 
-    parser.add_argument("--conv_layers", default=[[32, 32], [32, 16], [16, 8]], type=lambda x: eval(x))
-    parser.add_argument("--dgm_layers", default=[[32, 16, 4], [], []], type=lambda x: eval(x))
+    parser.add_argument("--conv_layers", default=[32, 16, 8], type=lambda x: eval(x))
+    parser.add_argument("--dgm_layers", default=[32, 16, 4], type=lambda x: eval(x))
     parser.add_argument("--fc_layers", default=[8, 8, 3], type=lambda x: eval(x))
-    parser.add_argument("--pre_fc", default=[-1, 32], type=lambda x: eval(x))
+    parser.add_argument("--pre_fc", default=[60, 32], type=lambda x: eval(x))
 
     parser.add_argument("--gfun", default='gcn')
     parser.add_argument("--ffun", default='gcn')
