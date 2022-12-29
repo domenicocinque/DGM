@@ -23,7 +23,5 @@ class Identity(nn.Module):
         self.retparam = retparam
         super(Identity, self).__init__()
 
-    def forward(self, *params):
-        if self.retparam is not None:
-            return params[self.retparam]
-        return params
+    def forward(self, graph_x, edge_index):
+        return graph_x, edge_index, None

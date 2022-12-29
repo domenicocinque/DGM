@@ -38,16 +38,17 @@ if __name__ == "__main__":
     parser = ArgumentParser()
     parser = pl.Trainer.add_argparse_args(parser)
     params = parser.parse_args([
+        '--accelerator', 'gpu',
+        '--devices', '1',
         '--max_epochs', '500',
-        '--check_val_every_n_epoch', '5'
+        '--check_val_every_n_epoch', '5',
         '--log_every_n_steps', '1'
     ])
-    parser.add_argument("--num_gpus", default=0, type=int)
     parser.add_argument("--dataset", default='Cora')
     parser.add_argument("--fold", default='0', type=int)
-    parser.add_argument("--conv_layers", default=[32, 16, 8], type=lambda x: eval(x))
-    parser.add_argument("--dgm_layers", default=[32, 16, 4], type=lambda x: eval(x))
-    parser.add_argument("--final_fc", default=[8, 8, -1], type=lambda x: eval(x))
+    parser.add_argument("--conv_layers", default=[32, 128, 32], type=lambda x: eval(x))
+    parser.add_argument("--dgm_layers", default=[32, None, None], type=lambda x: eval(x))
+    parser.add_argument("--final_fc", default=[32, 8, -1], type=lambda x: eval(x))
     parser.add_argument("--pre_fc", default=[-1, 32], type=lambda x: eval(x))
     parser.add_argument("--gfun", default='gcn')
     parser.add_argument("--ffun", default='gcn')
