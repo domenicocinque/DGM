@@ -21,13 +21,13 @@ class dDGMBlock(nn.Module):
         self.k = k
 
     def forward(self, x, edge_index):
-        x = self.embedding_f(x, edge_index).relu()
+        x = self.embedding_f(x, edge_index)
         edge_index_hat, logprobs = self.sample_without_replacement(x)
         edge_index_hat = fix_self_loops(edge_index_hat)
         return x, edge_index_hat, logprobs
 
     def sample_without_replacement(self, x):
-        logprobs = -self.temperature*torch.cdist(x, x)**2
+        logprobs = -self.temperature*pairwise_poincare_distances(x)#torch.cdist(x, x)**2
         n = logprobs.shape[1]
 
         q = torch.rand_like(logprobs) + 1e-8
@@ -40,7 +40,7 @@ class dDGMBlock(nn.Module):
         return edges, logprobs
 
 
-class dDGM(pl.LightningModule):
+class DDGM(pl.LightningModule):
     def __init__(self, hparams):
         super().__init__()
         if type(hparams) is not Namespace:
@@ -145,10 +145,10 @@ class dDGM(pl.LightningModule):
         return optimizer
 
 
-class SmalldDGM(pl.LightningModule):
-    def __init__(self, num_classes, learning_rate, p_dropout):
+class SmallDDGM(pl.LightningModule):
+    def __init__(self, num_classes, lr, p_dropout):
         super().__init__()
-        self.lr = learning_rate
+        self.lr = lr
         self.dropout = torch.nn.Dropout(p_dropout)
 
         self.pre_embed = GATConv(-1, 64)

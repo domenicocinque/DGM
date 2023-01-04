@@ -35,7 +35,7 @@ class CDGMBlock(nn.Module):
         return x, adj
 
     def compute_dense_adjacency(self, x):
-        dist = torch.cdist(x, x)**2
+        dist = pairwise_poincare_distances(x) #torch.cdist(x, x)**2
         exponent = self.temperature*(self.offset.abs() - dist)
         return torch.sigmoid(exponent)
 

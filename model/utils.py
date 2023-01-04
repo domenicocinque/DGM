@@ -13,6 +13,17 @@ def conv_resolver(name):
         raise ValueError(f"{name} not supported.")
 
 
+def pairwise_poincare_distances(x, dim=-1):
+    x_norm = (x ** 2).sum(dim, keepdim=True)
+    x_norm = (x_norm.sqrt() - 1).relu() + 1
+    x = x / (x_norm * (1 + 1e-2))
+    x_norm = (x ** 2).sum(dim, keepdim=True)
+
+    pq = torch.cdist(x, x) ** 2
+    dist = torch.arccosh(1e-6 + 1 + 2 * pq / ((1 - x_norm) * (1 - x_norm.transpose(-1, -2)))) ** 2
+    return dist
+
+
 def fix_self_loops(edge_index, type='sparse'):
     if type == 'sparse':
         edges, _ = torch_geometric.utils.remove_self_loops(edge_index)
