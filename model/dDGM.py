@@ -8,7 +8,7 @@ from torch_geometric.nn import MLP
 from model.utils import *
 
 
-class DGMBlock(nn.Module):
+class dDGMBlock(nn.Module):
     def __init__(
             self,
             embedding_channels: int,
@@ -21,13 +21,13 @@ class DGMBlock(nn.Module):
         self.k = k
 
     def forward(self, x, edge_index):
-        x = self.embedding_f(x, edge_index)
+        x = self.embedding_f(x, edge_index).relu()
         edge_index_hat, logprobs = self.sample_without_replacement(x)
         edge_index_hat = fix_self_loops(edge_index_hat)
         return x, edge_index_hat, logprobs
 
     def sample_without_replacement(self, x):
-        logprobs = - self.temperature*torch.cdist(x, x)**2
+        logprobs = -self.temperature*torch.cdist(x, x)**2
         n = logprobs.shape[1]
 
         q = torch.rand_like(logprobs) + 1e-8
@@ -40,7 +40,7 @@ class DGMBlock(nn.Module):
         return edges, logprobs
 
 
-class DGM(pl.LightningModule):
+class dDGM(pl.LightningModule):
     def __init__(self, hparams):
         super().__init__()
         if type(hparams) is not Namespace:
@@ -51,7 +51,7 @@ class DGM(pl.LightningModule):
         self.diffusion_g = ModuleList()
         for i, (dgm_l, conv_l) in enumerate(zip(hparams.dgm_layers, hparams.conv_layers)):
             if dgm_l is not None:
-                self.dgm_f.append(DGMBlock(embedding_channels=dgm_l, embedding_f=hparams.ffun, k=hparams.k))
+                self.dgm_f.append(dDGMBlock(embedding_channels=dgm_l, embedding_f=hparams.ffun, k=hparams.k))
             else:
                 self.dgm_f.append(Identity(retparam=0))
             self.diffusion_g.append(conv_resolver(hparams.gfun)(-1, conv_l))
@@ -98,8 +98,10 @@ class DGM(pl.LightningModule):
         self.avg_accuracy = self.avg_accuracy.to(corr_pred.device) * 0.95 + 0.05 * corr_pred
 
         self.log('train/acc', corr_pred.mean(), on_step=True, prog_bar=True, batch_size=1)
-        self.log('train/class_loss', class_loss.detach().cpu(), on_step=False, on_epoch=True, prog_bar=True, batch_size=1)
-        self.log('train/graph_loss', graph_loss.detach().cpu(), on_step=False, on_epoch=True, prog_bar=True, batch_size=1)
+        self.log('train/class_loss', class_loss.detach().cpu(),
+                 on_step=False, on_epoch=True, prog_bar=True, batch_size=1)
+        self.log('train/graph_loss', graph_loss.detach().cpu(),
+                 on_step=False, on_epoch=True, prog_bar=True, batch_size=1)
         return {'loss': loss}
 
     def validation_step(self, data, batch_idx):
@@ -140,4 +142,100 @@ class DGM(pl.LightningModule):
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), lr=self.hparams.lr)
+        return optimizer
+
+
+class SmalldDGM(pl.LightningModule):
+    def __init__(self, num_classes, learning_rate, p_dropout):
+        super().__init__()
+        self.lr = learning_rate
+        self.dropout = torch.nn.Dropout(p_dropout)
+
+        self.pre_embed = GATConv(-1, 64)
+        self.dgm1 = dDGMBlock(embedding_channels=64, embedding_f='gat', k=4)
+        self.conv1 = GATConv(-1, 128)
+        self.conv2 = GATConv(-1, 64)
+        self.classification = MLP([64, num_classes], dropout=p_dropout, plain_last=True)
+
+        self.avg_accuracy = None
+        self.cross_entropy = nn.CrossEntropyLoss()
+
+    def forward(self, x, edge_index):
+        x = self.pre_embed(x, edge_index)
+        graph_x = x.detach()
+
+        graph_x, edge_index, lprobs = self.dgm1(graph_x, edge_index)
+        x = self.conv1(x, edge_index).relu()
+
+        x = self.dropout(self.conv2(x, edge_index).relu())
+
+        return self.classification(x), lprobs
+
+    def training_step(self, data, batch_idx):
+        X, y, mask, edges = data.x, data.y, data.train_mask, data.edge_index
+        pred, logprobs = self(X, edges)
+
+        train_pred = pred[mask, :]
+        train_lab = y[mask]
+
+        class_loss = self.cross_entropy(train_pred, train_lab)
+
+        # GRAPH LOSS
+        if logprobs is not None:
+            corr_pred = (train_pred.argmax(-1) == train_lab).float().detach()
+            if self.avg_accuracy is None:
+                self.avg_accuracy = torch.ones_like(corr_pred) * 0.5
+
+            point_w = self.avg_accuracy - corr_pred
+            graph_loss = point_w * (logprobs[mask, :].exp()).mean([-1, -2])
+            graph_loss = graph_loss.mean()
+        else:
+            graph_loss = torch.tensor(0.).to(class_loss.device)
+
+        loss = class_loss + graph_loss
+        self.avg_accuracy = self.avg_accuracy.to(corr_pred.device) * 0.95 + 0.05 * corr_pred
+
+        self.log('train/acc', corr_pred.mean(), on_step=True, prog_bar=True, batch_size=1)
+        self.log('train/class_loss', class_loss.detach().cpu(), on_step=False, on_epoch=True, prog_bar=True, batch_size=1)
+        self.log('train/graph_loss', graph_loss.detach().cpu(), on_step=False, on_epoch=True, prog_bar=True, batch_size=1)
+        return {'loss': loss}
+
+    def validation_step(self, data, batch_idx):
+        X, y, mask, edge_index = data.x, data.y, data.val_mask, data.edge_index
+
+        pred, logprobs = self(X, edge_index)
+        pred = pred.softmax(-1)
+        for i in range(1, 3):
+            pred_, logprobs = self(X, edge_index)
+            pred += pred_.softmax(-1)
+
+        test_pred = pred[mask, :]
+        test_lab = y[mask]
+
+        correct_t = (test_pred.argmax(-1) == test_lab).float().mean().item()
+        loss = self.cross_entropy(test_pred, test_lab)
+
+        self.log('val/class_loss', loss.detach(), prog_bar=False, batch_size=1)
+        self.log('val/acc', correct_t, prog_bar=True, batch_size=1)
+
+    def test_step(self, data, batch_idx):
+        X, y, mask, edge_index = data.x, data.y, data.test_mask, data.edge_index
+
+        pred, logprobs = self(X, edge_index)
+        pred = pred.softmax(-1)
+        for i in range(1, 3):
+            pred_, logprobs = self(X, edge_index)
+            pred += pred_.softmax(-1)
+
+        test_pred = pred[mask, :]
+        test_lab = y[mask]
+
+        correct_t = (test_pred.argmax(-1) == test_lab).float().mean().item()
+        loss = self.cross_entropy(test_pred, test_lab)
+
+        self.log('test/class_loss', loss.detach().cpu(), batch_size=1)
+        self.log('test/acc', correct_t, batch_size=1)
+
+    def configure_optimizers(self):
+        optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
         return optimizer

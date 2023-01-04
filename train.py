@@ -1,10 +1,14 @@
 import os.path as osp
+import warnings
+
 import torch
 from torch_geometric.datasets import Planetoid
 from torch_geometric.loader import DataLoader
 from datasets import TadpoleDataset
 import pytorch_lightning as pl
-from model.dDGM import DGM
+from lightning_lite.utilities.warnings import PossibleUserWarning
+from model.dDGM import SmalldDGM
+from model.cDGM import SmallCDGM
 import torch_geometric.transforms as T
 from argparse import ArgumentParser
 from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping
@@ -12,6 +16,7 @@ from pytorch_lightning.loggers import TensorBoardLogger
 
 
 def run_training_process(params):
+    warnings.filterwarnings("ignore", category=PossibleUserWarning)
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
     transform = T.Compose([
@@ -27,10 +32,14 @@ def run_training_process(params):
     dataloader = DataLoader(data, batch_size=1)
     params.pre_fc[0] = data.num_features
     params.final_fc[-1] = data.num_classes
-    model = DGM(params)
+    model = SmallCDGM(data.num_classes, lr=1e-2, p_dropout=0.3)
 
     logger = TensorBoardLogger("logs/")
-    trainer = pl.Trainer.from_argparse_args(params, logger=logger)
+    trainer = pl.Trainer.from_argparse_args(
+        params,
+        accelerator='gpu' if torch.cuda.is_available() else 'cpu',
+        logger=logger
+    )
     trainer.fit(model, dataloader, dataloader)
 
 
@@ -38,13 +47,11 @@ if __name__ == "__main__":
     parser = ArgumentParser()
     parser = pl.Trainer.add_argparse_args(parser)
     params = parser.parse_args([
-        '--accelerator', 'gpu',
-        '--devices', '1',
         '--max_epochs', '500',
         '--check_val_every_n_epoch', '5',
         '--log_every_n_steps', '1'
     ])
-    parser.add_argument("--dataset", default='Cora')
+    parser.add_argument("--dataset", default='Tadpole')
     parser.add_argument("--fold", default='0', type=int)
     parser.add_argument("--conv_layers", default=[32, 128, 32], type=lambda x: eval(x))
     parser.add_argument("--dgm_layers", default=[32, None, None], type=lambda x: eval(x))

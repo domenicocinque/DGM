@@ -1,6 +1,6 @@
 # Differentiable Graph Module
 
-### Work in progress...
+A modified implementation of the paper "Differentiable Graph Module (DGM) for Graph Convolutional Networks" 
+by Anees Kazi*, Luca Cosmo*, Seyed-Ahmad Ahmadi, Nassir Navab, and Michael Bronstein.
 
-A modified version of the code for the paper "Differentiable Graph Module (DGM) for Graph Convolutional Networks" 
-by Anees Kazi*, Luca Cosmo*, Seyed-Ahmad Ahmadi, Nassir Navab, and Michael Bronstein
+
