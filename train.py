@@ -38,6 +38,7 @@ def run_training_process(params):
     trainer = pl.Trainer.from_argparse_args(
         params,
         accelerator='gpu' if torch.cuda.is_available() else 'cpu',
+        devices=1 if torch.cuda.is_available() else None,
         logger=logger
     )
     trainer.fit(model, dataloader, dataloader)
@@ -47,11 +48,11 @@ if __name__ == "__main__":
     parser = ArgumentParser()
     parser = pl.Trainer.add_argparse_args(parser)
     params = parser.parse_args([
-        '--max_epochs', '500',
+        '--max_epochs', '100',
         '--check_val_every_n_epoch', '5',
         '--log_every_n_steps', '1'
     ])
-    parser.add_argument("--dataset", default='Tadpole')
+    parser.add_argument("--dataset", default='Cora')
     parser.add_argument("--fold", default='0', type=int)
     parser.add_argument("--conv_layers", default=[32, 128, 32], type=lambda x: eval(x))
     parser.add_argument("--dgm_layers", default=[32, None, None], type=lambda x: eval(x))

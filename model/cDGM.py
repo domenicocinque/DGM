@@ -3,6 +3,7 @@ from argparse import Namespace
 import pytorch_lightning as pl
 import torch
 from torch.nn import ModuleList
+import torch.nn.functional as F
 from torch_geometric.nn import MLP, DenseGCNConv
 from torchmetrics.functional.classification import multiclass_accuracy
 
@@ -12,25 +13,31 @@ from model.utils import *
 class CDGMBlock(nn.Module):
     def __init__(
             self,
+            in_channels: int,
             embedding_channels: int,
             embedding_f: str = 'gcn',
             k: int = 4
     ):
         super().__init__()
-        self.embedding_f = conv_resolver(embedding_f)(-1, embedding_channels)
+        self.embedding_f = conv_resolver(embedding_f)(in_channels, embedding_channels)
         self.temperature = nn.Parameter(torch.tensor(4.))
-        self.offset = nn.Parameter(torch.tensor(0.))
+        self.offset = nn.Parameter(torch.tensor(0.5))
         self.k = k
+        
+        self.scale = nn.Parameter(torch.tensor(-1).float(),requires_grad=False)
+        self.centroid = nn.Parameter(torch.zeros((1,1, in_channels)).float(),requires_grad=False)
 
     def forward(self, x, edge_index):
-        x = self.embedding_f(x, edge_index).relu()
-        adj = self.compute_dense_adjacency(x)
+        x = self.embedding_f(x, edge_index)
+        self.centroid.data = x.mean(-2,keepdim=True).detach()
+        self.scale.data = (0.9/(x-self.centroid).abs().max()).detach()
+        adj = self.compute_dense_adjacency((x-self.centroid)*self.scale)
         return x, adj
 
     def compute_dense_adjacency(self, x):
         dist = torch.cdist(x, x)**2
-        exponent = -self.temperature*(dist - self.offset)
-        return torch.reciprocal(1+torch.exp(exponent))
+        exponent = self.temperature*(self.offset.abs() - dist)
+        return torch.sigmoid(exponent)
 
 
 class SmallCDGM(pl.LightningModule):
@@ -40,8 +47,8 @@ class SmallCDGM(pl.LightningModule):
 
         self.dropout = torch.nn.Dropout(p_dropout)
         self.pre_embed = GCNConv(-1, 64)
-        self.dgm1 = CDGMBlock(embedding_channels=64, embedding_f='gat', k=4)
-        self.conv1 = DenseGCNConv(-1, 128)
+        self.dgm1 = CDGMBlock(in_channels=64, embedding_channels=64, embedding_f='gcn', k=4)
+        self.conv1 = DenseGCNConv(-1, 64)
         self.conv2 = DenseGCNConv(-1, 64)
         self.classification = MLP([64, num_classes], dropout=p_dropout, plain_last=True)
 
@@ -49,13 +56,16 @@ class SmallCDGM(pl.LightningModule):
         self.cross_entropy = nn.CrossEntropyLoss()
 
     def forward(self, x, edge_index):
-        x = self.pre_embed(x, edge_index)
+        x = F.leaky_relu(self.pre_embed(x, edge_index), negative_slope=0.2)
         graph_x = x.detach()
 
-        graph_x, adj = self.dgm1(graph_x, edge_index)
-        x = self.conv1(x, adj).relu()
-
-        x = self.dropout(self.conv2(x, adj).relu())
+        graph_x, adj = self.dgm1(x, edge_index)
+        adj = fix_self_loops(adj, type='dense')
+        #tensorboard = self.logger.experiment
+        #tensorboard.add_image(img_tensor=adj, tag='adj', dataformats='HW', global_step=self.global_step)       
+        x = F.leaky_relu(self.conv1(x, adj), negative_slope=0.2)
+        #x = F.leaky_relu(self.conv2(x, adj), negative_slope=0.2)
+        x = self.dropout(x)
         return self.classification(x).squeeze(0)
 
     def common_step(self, data, stage='train'):
@@ -73,8 +83,8 @@ class SmallCDGM(pl.LightningModule):
 
     def training_step(self, data, batch_idx):
         loss, acc = self.common_step(data, 'train')
-        self.log('train/loss', loss, on_step=False, on_epoch=True, prog_bar=True, batch_size=1)
-        self.log('train/acc', acc, on_step=False, on_epoch=True, prog_bar=False, batch_size=1)
+        self.log('train/loss', loss, on_step=False, on_epoch=True, prog_bar=False, batch_size=1)
+        self.log('train/acc', acc, on_step=False, on_epoch=True, prog_bar=True, batch_size=1)
         return {'loss': loss}
 
     def validation_step(self, data, batch_idx):
